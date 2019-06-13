@@ -6,6 +6,7 @@
 #include <math.h>
 #include <vector>
 #include <iostream>
+#include <utility>
 using namespace std;
 #define blockSize 4096 // 块大小规定为4KB，这里和缓冲区相同
 #define nodeSize 3
@@ -18,7 +19,7 @@ public:
     int size;
     bNode *parentNode;
     bNode *childNode[MAX]; // 从0开始，共nodeSize个基本单位
-    int value[MAX];
+    pair<int,int> value[MAX]; // first:key; second:addr/offset
 
     bNode();
     bool isLeaf();
@@ -30,7 +31,7 @@ bNode::bNode()
     parentNode = NULL;
     for (int i = 0; i < MAX; i++)
     {
-        value[i] = INT_MAX;
+        value[i] = make_pair(INT_MAX,-1);
         childNode[i] = NULL;
     }
 }
@@ -52,23 +53,25 @@ public:
     string keyName;       // 对应的属性名
     bNode *root;          // 树顶点
 
-    bplusTree()
-    {
-        numberOfPointers = nodeSize + 1;
-        root = new bNode();
-    };
+    bplusTree();
     ~bplusTree(){};
     bplusTree(string tableName, string keyName);
 
     void splitLeaf(bNode *curNode);
     void splitNonLeaf(bNode *curNode);
-    void insertNode(bNode *curNode, int key);
+    void insertNode(bNode *curNode, int key, int addr);
     void deleteNode(bNode *curNode, int key, int curNodePosition);
     void mergeNode(bNode *leftNode, bNode *rightNode, bool isLeaf, int posOfRightNode);
     void redistributeNode(bNode *leftNode, bNode *rightNode, bool isLeaf, int posOfLeftNode, int whichOneisCurNode);
     int getAddrWithKey(bNode *curNode, int key);
 
     void print(vector<bNode *> Nodes); // 打印树结构，调试用
+};
+
+bplusTree::bplusTree()
+{
+    numberOfPointers = nodeSize + 1;
+    root = new bNode();
 };
 
 bplusTree::bplusTree(string tableName, string keyName)
@@ -88,11 +91,11 @@ void bplusTree::print(vector<bNode *> Nodes)
         int j;
         for (j = 0; j < curNode->size; j++)
         {
-            cout << curNode->value[j] << "|";
+            cout << curNode->value[j].first<<":"<<curNode->value[j].second << "|";
             if (curNode->childNode[j] != NULL)
                 newNodes.push_back(curNode->childNode[j]);
         }
-        if (curNode->value[j] == INT_MAX && curNode->childNode[j] != NULL)
+        if (curNode->value[j].first == INT_MAX && curNode->childNode[j] != NULL)
             newNodes.push_back(curNode->childNode[j]);
         cout << "]  ";
     }
@@ -114,7 +117,8 @@ void bplusTree::print(vector<bNode *> Nodes)
 
 void bplusTree::splitLeaf(bNode *curNode)
 {
-    cout << "this is split leaf node function\n";
+//    cout << "this is split leaf node function\n";
+    pair<int,int> tempPair;
     int x, i, j;
 
     if (numberOfPointers % 2)
@@ -131,16 +135,16 @@ void bplusTree::splitLeaf(bNode *curNode)
     for (i = x, j = 0; i < numberOfPointers; i++, j++)
     {
         rightNode->value[j] = curNode->value[i];
-        curNode->value[i] = INT_MAX;
+        curNode->value[i] = make_pair(INT_MAX,-1);
     }
-    int val = rightNode->value[0];
-
+    int val = rightNode->value[0].first;
+    int address = rightNode->value[0].second;
     if (curNode->parentNode == NULL)
     {
         bNode *parentNode = new bNode();
         parentNode->parentNode = NULL;
         parentNode->size = 1;
-        parentNode->value[0] = val;
+        parentNode->value[0] = rightNode->value[0];
         parentNode->childNode[0] = curNode;
         parentNode->childNode[1] = rightNode;
         curNode->parentNode = rightNode->parentNode = parentNode;
@@ -150,24 +154,25 @@ void bplusTree::splitLeaf(bNode *curNode)
     else
     {
         curNode = curNode->parentNode;
-        bNode *newchildNode = new bNode();
-        newchildNode = rightNode;
+        bNode *newChildNode = new bNode();
+        newChildNode = rightNode;
+        tempPair = make_pair(val,address);
         for (i = 0; i <= curNode->size; i++)
         {
-            if (val < curNode->value[i])
+            if (val < curNode->value[i].first)
             {
-                swap(curNode->value[i], val);
+                swap(curNode->value[i], tempPair);
             }
         }
         curNode->size++;
         for (i = 0; i < curNode->size; i++)
         {
-            if (newchildNode->value[0] < curNode->childNode[i]->value[0])
+            if (newChildNode->value[0] < curNode->childNode[i]->value[0])
             {
-                swap(curNode->childNode[i], newchildNode);
+                swap(curNode->childNode[i], newChildNode);
             }
         }
-        curNode->childNode[i] = newchildNode;
+        curNode->childNode[i] = newChildNode;
         for (i = 0; curNode->childNode[i] != NULL; i++)
         {
             curNode->childNode[i]->parentNode = curNode;
@@ -179,6 +184,8 @@ void bplusTree::splitNonLeaf(bNode *curNode)
 {
     cout << "this is split nonleaf node function\n";
     int x, i, j;
+    pair<int,int> tempPair;
+
     x = numberOfPointers / 2;
     bNode *rightNode = new bNode();
     curNode->size = x;
@@ -189,11 +196,12 @@ void bplusTree::splitNonLeaf(bNode *curNode)
     {
         rightNode->value[j] = curNode->value[i];
         rightNode->childNode[j] = curNode->childNode[i];
-        curNode->value[i] = INT_MAX;
+        curNode->value[i] = make_pair(INT_MAX,-1);
         if (i != x)
             curNode->childNode[i] = NULL;
     }
-    int val = rightNode->value[0];
+    int val = rightNode->value[0].first;
+    int address = rightNode->value[0].second;
     memcpy(&rightNode->value, &rightNode->value[1], sizeof(int) * (rightNode->size + 1));
     memcpy(&rightNode->childNode, &rightNode->childNode[1], sizeof(root) * (rightNode->size + 1));
 
@@ -211,7 +219,7 @@ void bplusTree::splitNonLeaf(bNode *curNode)
         bNode *parentNode = new bNode();
         parentNode->parentNode = NULL;
         parentNode->size = 1;
-        parentNode->value[0] = val;
+        parentNode->value[0] = make_pair(val,address);
         parentNode->childNode[0] = curNode;
         parentNode->childNode[1] = rightNode;
         curNode->parentNode = rightNode->parentNode = parentNode;
@@ -223,12 +231,12 @@ void bplusTree::splitNonLeaf(bNode *curNode)
         curNode = curNode->parentNode;
         bNode *newchildNode = new bNode();
         newchildNode = rightNode;
-
+        tempPair = make_pair(val,address);
         for (i = 0; i <= curNode->size; i++)
         {
-            if (val < curNode->value[i])
+            if (val < curNode->value[i].first)
             {
-                swap(curNode->value[i], val);
+                swap(curNode->value[i], tempPair);
             }
         }
         curNode->size++;
@@ -247,21 +255,22 @@ void bplusTree::splitNonLeaf(bNode *curNode)
     }
 }
 
-void bplusTree::insertNode(bNode *curNode, int key)
+void bplusTree::insertNode(bNode *curNode, int key, int addr)
 {
     cout << "this is insert node function\n";
+    pair<int,int> tempPair = make_pair(key,addr);
     for (int i = 0; i <= curNode->size; i++)
     {
-        if (key < curNode->value[i] && curNode->childNode[i] != NULL)
+        if (key < curNode->value[i].first && curNode->childNode[i] != NULL)
         {
-            insertNode(curNode->childNode[i], key);
+            insertNode(curNode->childNode[i], key,addr);
             if (curNode->size == numberOfPointers)
                 splitNonLeaf(curNode);
             return;
         }
-        else if (key < curNode->value[i] && curNode->childNode[i] == NULL)
+        else if (key < curNode->value[i].first && curNode->childNode[i] == NULL)
         {
-            swap(curNode->value[i], key);
+            swap(curNode->value[i], tempPair);
             if (i == curNode->size)
             {
                 curNode->size++;
@@ -277,7 +286,7 @@ void bplusTree::insertNode(bNode *curNode, int key)
 
 void bplusTree::redistributeNode(bNode *leftNode, bNode *rightNode, bool isLeaf, int posOfLeftNode, int whichOneisCurNode)
 {
-    int PrevRightFirstVal = rightNode->value[0];
+    int PrevRightFirstVal = rightNode->value[0].first;
 
     if (whichOneisCurNode == 0)
     {
@@ -310,7 +319,7 @@ void bplusTree::redistributeNode(bNode *leftNode, bNode *rightNode, bool isLeaf,
             rightNode->childNode[0] = leftNode->childNode[leftNode->size];
             rightNode->size++;
             leftNode->parentNode->value[posOfLeftNode] = leftNode->value[leftNode->size - 1];
-            leftNode->value[leftNode->size - 1] = INT_MAX;
+            leftNode->value[leftNode->size - 1] = make_pair(INT_MAX,-1);
             leftNode->childNode[leftNode->size] = NULL;
             leftNode->size--;
         }
@@ -319,7 +328,7 @@ void bplusTree::redistributeNode(bNode *leftNode, bNode *rightNode, bool isLeaf,
             memcpy(&rightNode->value[1], &rightNode->value[0], sizeof(int) * (rightNode->size + 1));
             rightNode->value[0] = leftNode->value[leftNode->size - 1];
             rightNode->size++;
-            leftNode->value[leftNode->size - 1] = INT_MAX;
+            leftNode->value[leftNode->size - 1] = make_pair(INT_MAX,-1);
             leftNode->size--;
             leftNode->parentNode->value[posOfLeftNode] = rightNode->value[0];
         }
@@ -349,15 +358,15 @@ void bplusTree::mergeNode(bNode *leftNode, bNode *rightNode, bool isLeaf, int po
 void bplusTree::deleteNode(bNode *curNode, int key, int curNodePosition)
 {
     bool isLeaf = curNode->isLeaf();
-    int prevLeftMostVal = curNode->value[0];
+    int prevLeftMostVal = curNode->value[0].first;
 
     for (int i = 0; dataFound == false && i <= curNode->size; i++)
     {
-        if (key < curNode->value[i] && curNode->childNode[i] != NULL)
+        if (key < curNode->value[i].first && curNode->childNode[i] != NULL)
         {
             deleteNode(curNode->childNode[i], key, i);
         }
-        else if (key == curNode->value[i] && curNode->childNode[i] == NULL)
+        else if (key == curNode->value[i].first && curNode->childNode[i] == NULL)
         {
             memcpy(&curNode->value[i], &curNode->value[i + 1], sizeof(int) * (curNode->size + 1));
             curNode->size--;
@@ -460,7 +469,7 @@ void bplusTree::deleteNode(bNode *curNode, int key, int curNodePosition)
     {
         for (int i = 0; i < tempNode->size; i++)
         {
-            if (tempNode->value[i] == prevLeftMostVal)
+            if (tempNode->value[i].first == prevLeftMostVal)
             {
                 tempNode->value[i] = curNode->value[0];
                 break;
@@ -474,12 +483,12 @@ int bplusTree::getAddrWithKey(bNode *curNode, int key)
 {
     for (int i = 0; i < curNode->size; i++)
     {
-        if (curNode->value[i] == key)
+        if (curNode->value[i].first == key)
         {
             searchDataFound = true;
-            return curNode->value[i];
+            return curNode->value[i].second;
         }
-        else if (curNode->value[i] > key)
+        else if (curNode->value[i].first > key)
         {
             if(curNode->isLeaf()) return -1;
             return getAddrWithKey(curNode->childNode[i], key);

@@ -8,7 +8,7 @@ int main()
 
 void testTree()
 {
-    int mode, key;
+    int mode, key, addr;
     bplusTree mytree;
     vector<bNode *> Nodes;
     while (1)
@@ -17,7 +17,9 @@ void testTree()
         if (mode == 1)
         {
             cout << "insert " << key << "\n";
-            mytree.insertNode(mytree.root, key);
+            cin >> addr;
+            cout << "addr: " << addr << "\n";
+            mytree.insertNode(mytree.root, key,addr);
             Nodes.push_back(mytree.root);
             mytree.print(Nodes);
             Nodes.clear();
