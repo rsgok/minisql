@@ -472,12 +472,20 @@ void bplusTree::deleteNode(bNode *curNode, int key, int curNodePosition)
 
 int bplusTree::getAddrWithKey(bNode *curNode, int key)
 {
-    // bool isFound = false;
-    // for (int i = 0; i < curNode->size; i++)
-    // {
-    //     if (curNode->value[i])
-    // }
-    return 1;
+    for (int i = 0; i < curNode->size; i++)
+    {
+        if (curNode->value[i] == key)
+        {
+            searchDataFound = true;
+            return curNode->value[i];
+        }
+        else if (curNode->value[i] > key)
+        {
+            if(curNode->isLeaf()) return -1;
+            return getAddrWithKey(curNode->childNode[i], key);
+        }
+    }
+    if(!searchDataFound) return -1;
 }
 
 #endif

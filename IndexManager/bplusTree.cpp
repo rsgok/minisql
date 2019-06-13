@@ -18,15 +18,25 @@ void testTree()
         {
             cout << "insert " << key << "\n";
             mytree.insertNode(mytree.root, key);
+            Nodes.push_back(mytree.root);
+            mytree.print(Nodes);
+            Nodes.clear();
         }
         if (mode == 2)
         {
             cout << "delete " << key << "\n";
             mytree.dataFound = false;
             mytree.deleteNode(mytree.root, key, 0);
+            Nodes.push_back(mytree.root);
+            mytree.print(Nodes);
+            Nodes.clear();
         }
-        Nodes.push_back(mytree.root);
-        mytree.print(Nodes);
-        Nodes.clear();
+        if (mode == 3)
+        {
+            cout << "search " << key << "\n";
+            mytree.searchDataFound = false;
+            int temp= mytree.getAddrWithKey(mytree.root, key);
+            cout <<  temp << "\n";
+        }
     }
 }
