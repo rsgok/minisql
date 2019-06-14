@@ -240,19 +240,19 @@ InsPos BufferManager::getInsertPosition(Table &tableinfor)
         return iPos;
     }
     string filename = tableinfor.getname() + ".table";
-    int length = tableinfor.dataSize() + 1;    //多余的一位放在开头，表示是否有效
-    int blockOffset = tableinfor.blockNum - 1; //将新加入的元素插入到最后
+    int length = tableinfor.dataSize() + 1;    // first bit as an additional one to check if occupied
+    int blockOffset = tableinfor.blockNum - 1; // put the latest-added element at end
     int blockAddr = checkExist(filename, blockOffset);
     if (blockAddr == -1)
     {
-        blockAddr = getUnoccupiedBlock(); //获取空的block
+        blockAddr = getUnoccupiedBlock();
         readBlock(filename, blockOffset, blockAddr);
     }
     int recordNum = BLOCKSIZE / length;
     for (int offset = 0; offset < recordNum; offset++)
     {
         int position = offset * length;
-        char isEmpty = blocks[blockAddr].data[position]; //检查第一位是否有效，判断该行是否有内容
+        char isEmpty = blocks[blockAddr].data[position]; //check if there are contents
         if (isEmpty == EMPTY)
         { //find an empty space
             iPos.blockAddr = blockAddr;
@@ -260,7 +260,7 @@ InsPos BufferManager::getInsertPosition(Table &tableinfor)
             return iPos;
         }
     }
-    //该block已经装满，新开一个block
+    //if the block is full, then create new block
     iPos.blockAddr = addBlockInFile(tableinfor);
     iPos.position = 0;
     return iPos;
