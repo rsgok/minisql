@@ -94,6 +94,7 @@ public:
     void modifyBlock(int blockAddr);
     InsPos getInsertPosition(Table &tableinfor);
     int addBlockInFile(Table &tableinfor);
+    void setInvalid(string fileName);
 
     BufferBlock blocks[MAXBLOCKNUM];
 
@@ -278,6 +279,18 @@ int BufferManager::addBlockInFile(Table &tableinfor)
     CataManager ca;
     ca.changeblock(tableinfor.getname(), tableinfor.blockNum);
     return blockAddr;
+}
+
+void BufferManager::setInvalid(string fileName)
+{
+    for (int i = 0; i < MAXBLOCKNUM; i++)
+    {
+        if (blocks[i].fileName == fileName)
+        {
+            blocks[i].isOccupied = 0;
+            blocks[i].isModified = 0;
+        }
+    }
 }
 
 #endif
