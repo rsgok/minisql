@@ -270,7 +270,7 @@ InsPos BufferManager::getInsertPosition(Table &tableinfor)
 int BufferManager::addBlockInFile(Table &tableinfor)
 {
     int blockAddr = getUnoccupiedBlock();
-    blocks[blockAddr].initialize();
+    blocks[blockAddr].Init();
     blocks[blockAddr].isOccupied = 1;
     blocks[blockAddr].isModified = 1;
     blocks[blockAddr].fileName = tableinfor.getname() + ".table";
