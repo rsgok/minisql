@@ -15,16 +15,16 @@ void CataManager::create_table(std::string s, Attribute atr, short primary, Inde
     if(primary>=0)
         atr.unique[primary] = true;
     
-    tableName = "T_" + s;
+    string tableName = "T_" + s;
     int i;
     
     string filename = tableName;
     fstream fout(filename.c_str(), ios::out);
     fout.close();
     
-    int No = bf.getbufferNum(tableName, 0);
+    int No = bf.getBlockAddr(tableName, 0);
 
-    char* begin = bf.bufferBlock[No].values;
+    char* begin = bf.blocks[No].data;
     int pos = 0;
     
 	//put the number of attribute and index into buffer
@@ -71,7 +71,7 @@ void CataManager::create_table(std::string s, Attribute atr, short primary, Inde
     }
     
     //after the write operation, record
-    bf.writeBlock(No);
+    bf.modifyBlock(No);
     
     Table* t = getTable(s);
     API api;
@@ -85,7 +85,7 @@ void CataManager::create_table(std::string s, Attribute atr, short primary, Inde
   else return true, do have that table
 */
 bool CataManager::hasTable(std::string s){
-    tableName = "T_" + s;
+    string tableName = "T_" + s;
     std::ifstream in(tableName);
     if(!in){
         return false;
@@ -107,8 +107,8 @@ Table* CataManager::getTable(std::string s){
     int pri;
     int bn;
     //use tableName to locate the buffer number
-    int No = bf.getbufferNum(tableName, 0);
-    char* begin = bf.bufferBlock[No].values;
+    int No = bf.getBlockAddr(tableName, 0);
+    char* begin = bf.blocks[No].data;
     int pos = 0;
     int length;
     
@@ -170,7 +170,7 @@ Table* CataManager::getTable(std::string s){
     }
     
 	//record the read operation after reading
-    bf.useBlock(No);
+    //bf.useBlock(No);
     Table* t = new Table(s,atr,bn);
     
     
@@ -199,10 +199,10 @@ void CataManager::create_index(std::string tname, std::string aname, std::string
         temp->setindex(i, iname);
         
         string tableName = "T_"+tname;
-        int No = bf.getbufferNum(tableName, 0);
+        int No = bf.getBlockAddr(tableName, 0);
         
         //get the pointer of beginning of value in the table
-        char* begin = bf.bufferBlock[No].values;
+        char* begin = bf.blocks[No].data;
         int pos = 0;
         //read the data from original table, then add the new index, put them in
         Attribute atr = temp->attr;
@@ -251,7 +251,7 @@ void CataManager::create_index(std::string tname, std::string aname, std::string
             pos = pos + sizeof(short);
         }
         
-        bf.writeBlock(No);
+        bf.modifyBlock(No);
         
         
         delete temp;
@@ -298,8 +298,8 @@ void CataManager::show_table(std::string tname){
     std::cout << "|  attributeName   | dataType | ifUnique | ifPrimary" << std::endl;
     for(i=0;i<t->getCsize();i++){
     	j = 0;
-        std::cout << t->attr.name[i] << ;
-        while( (attr.name[i].length()+j) < 20 ){
+        std::cout << t->attr.name[i] << endl;
+        while( (t->attr.name[i].length()+j) < 20 ){
         	std::cout << " ";
         	j++;
         }
@@ -309,9 +309,9 @@ void CataManager::show_table(std::string tname){
             std::cout << "float" << "      ";
         else{
         	length = 0;
-        	if(attr.flag[i]<10){
+        	if(t->attr.flag[i]<10){
         		length = 1;
-        	}else if(attr.flag[i]<100){
+        	}else if(t->attr.flag[i]<100){
         		length = 2;
         	}else{
         		length = 3;
@@ -351,13 +351,13 @@ void CataManager::show_table(std::string tname){
 
 void CataManager::changeblock(std::string tname, int bn){
     string tableName = "T_" + tname;
-    int No = bf.getbufferNum(tableName, 0);
-    char* begin = bf.bufferBlock[No].values;
+    int No = bf.getBlockAddr(tableName, 0);
+    char* begin = bf.blocks[No].data;
     int pos = 0;
     pos = pos + sizeof(int) + sizeof(int);
     memcpy(&begin[pos], &bn, sizeof(int));
     //after changing block, record it
-    bf.writeBlock(No);
+    bf.modifyBlock(No);
 
 }
 

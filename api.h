@@ -2,7 +2,7 @@
 #ifndef _API_H
 #define _API_H
 #include "base.h"
-#include "RecordManager.h"
+#include "RM.h"
 
 extern BufferManager bf;
 

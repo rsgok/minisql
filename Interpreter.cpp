@@ -489,7 +489,7 @@ void Interpreter::EXEC_CREATE()
 void Interpreter::EXEC_SHOW() {
 	CataManager cm;
 	string tname;
-	tname.append(query.substr(11, query.size()));
+	tname.append(query.substr(11, query.size() - 13));
 	cm.show_table(tname);
 }
 
@@ -648,7 +648,6 @@ void Interpreter::EXEC_DELETE() {
 }
 
 void Interpreter::EXEC_SELECT() {
-	//where ×Ö¶Î
 	int pos1 = 7;
 	int pos2 = next_space(pos1);
 	CataManager cm;
@@ -658,7 +657,7 @@ void Interpreter::EXEC_SELECT() {
 	int attr_select = 0;
 	string attr_name[32];
 	if (query.substr(pos1, pos2 - pos1) == "*") {
-		attr_select = -1;//È«Ñ¡£¡
+		attr_select = -1;//å…¨éƒ¨é€‰æ‹©
 		pos1 = pos2 + 1;
 		pos1 = next_space(pos1);
 		if (query.substr(pos1, pos2 - pos1) != "from") {
@@ -682,13 +681,13 @@ void Interpreter::EXEC_SELECT() {
 		}
 	}
 
-	//from ×Ö¶Î
+	//from å­—æ®µ
 	pos1 = pos2 + 1;
 	pos2 = next_space(pos1);
 	string tname = query.substr(pos1, pos2 - pos1);
 	Table * tb = cm.getTable(tname);
 
-	//where×Ö¶Î
+	//where å­—æ®µ
 
 	Attribute A = tb->getattribute();
 	string temp;

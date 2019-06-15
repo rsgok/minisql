@@ -9,7 +9,7 @@
 #ifndef Catalog_h
 #define Catalog_h
 #include "base.h"
-#include "BufferManager.h"
+#include "MyBufferManager.hpp"
 extern BufferManager bf;
 
 class CataManager{

@@ -120,14 +120,14 @@ Table RecordManager::Select(Table& table_in, vector<int>attrSelect, vector<int>m
     const int record_num = BLOCKSIZE / length;
 
     for (int blockOffset = 0; blockOffset < table_in.blockNum; blockOffset++){
-        int bufferNum = buf_ptr->getIfIsInBuffer(file_name, blockOffset);
+        int bufferNum = buf_ptr->checkExist(file_name, blockOffset);
         if (bufferNum == -1){//如果没在内存中
-            bufferNum = buf_ptr->getEmptyBuffer();
+            bufferNum = buf_ptr->getUnoccupiedBlock();
             buf_ptr->readBlock(file_name, blockOffset, bufferNum);
         }
         for (int offset = 0; offset < record_num;offset++){
             int position = offset * length;
-            row_str = buf_ptr->bufferBlock[bufferNum].getvalues(position, position + length);
+            row_str = buf_ptr->blocks[bufferNum].getDataStr(position, position + length);
             if (row_str.c_str()[0] == EMPTY) continue;//该行是空的
             int c_pos = 1;//当前在数据流中指针的位置，0表示该位是否有效，因此数据从第一位开始
             tuper *temp_tuper = new tuper;
@@ -215,7 +215,7 @@ int RecordManager::FindWithIndex(Table& table_in, tuper& row, int mask)
         if (table_in.index.location[i] == mask) { //找到索引
             Data* ptrData;
             ptrData = row[mask];
-            int pos = indexMA.Find(table_in.getname() + to_string(mask) + ".index", ptrData);
+            int pos = indexMA.Find(table_in.getname() + to_string(mask) + ".index", int(ptrData));
             return pos;
         }
     }
@@ -260,21 +260,21 @@ void RecordManager::Insert(Table& table_in, tuper& singleTuper)
     char *charTuper;
     charTuper = Tuper2Char(table_in, singleTuper);//把一个元组转换成字符串
     //判断是否unique
-    insertPos iPos = buf_ptr->getInsertPosition(table_in);//获取插入位置
+    InsPos iPos = buf_ptr->getInsertPosition(table_in);//获取插入位置
 
-    buf_ptr->bufferBlock[iPos.bufferNUM].values[iPos.position] = NOTEMPTY;
-    memcpy(&(buf_ptr->bufferBlock[iPos.bufferNUM].values[iPos.position + 1]), charTuper, table_in.dataSize());
+    buf_ptr->blocks[iPos.blockAddr].getDataChar[iPos.position] = NOTEMPTY;
+    memcpy(&(buf_ptr->blocks[iPos.blockAddr].getDataChar[iPos.position + 1]), charTuper, table_in.dataSize());
     int length = table_in.dataSize() + 1; //一个元组的信息在文档中的长度
     //insert tuper into index file，更新索引的值
     IndexManager indexMA;
     int blockCapacity = BLOCKSIZE / length;
     for (int i = 0; i < table_in.index.num; i++) {
-        int tuperAddr = buf_ptr->blocks[iPos.bufferNUM].blockOffset*blockCapacity + iPos.position / length; //the tuper's addr in the data file
+        int tuperAddr = buf_ptr->blocks[iPos.blockAddr].blockOffset*blockCapacity + iPos.position / length; //the tuper's addr in the data file
         for (int j = 0; j < table_in.index.num; j++) {
-            indexMA.Insert(table_in.getname() + to_string(table_in.index.location[j]) + ".index", singleTuper[table_in.index.location[i]], tuperAddr);
+            indexMA.Insert(table_in.getname() + to_string(table_in.index.location[j]) + ".index", int(singleTuper[table_in.index.location[i]]), tuperAddr);
         }
     }
-    buf_ptr->WriteBack(iPos.bufferNUM);
+    buf_ptr->WriteBack(iPos.blockAddr);
     delete[] charTuper;
 }
 
@@ -331,7 +331,7 @@ void RecordManager::InsertWithIndex(Table& table_in, tuper& singleTuper)
     for (int i = 0; i < table_in.index.num; i++) {
         int tuperAddr = buf_ptr->blocks[iPos.blockAddr].blockOffset*blockCapacity + iPos.position / length; //the tuper's addr in the data file
         for (int j = 0; j < table_in.index.num; j++) {
-            indexMA.Insert(table_in.getname() + to_string(table_in.index.location[j]) + ".index", singleTuper[table_in.index.location[i]], tuperAddr);
+            indexMA.Insert(table_in.getname() + to_string(table_in.index.location[j]) + ".index", int(singleTuper[table_in.index.location[i]]), tuperAddr);
         }
     }
     buf_ptr->WriteBack(iPos.blockAddr);
@@ -440,8 +440,8 @@ bool RecordManager::CreateTable(Table& table_in)
     fstream fout(file_name.c_str(), ios::out);
     fout.close();
     table_in.blockNum = 1;
-    //CataManager Ca;
-    //Ca.changeblock(table_in.getname(), 1);
+    CataManager Ca;
+    Ca.changeblock(table_in.getname(), 1);
     return true;
 }
 
@@ -503,19 +503,19 @@ bool RecordManager::UNIQUE(Table& table_in, where w, int loca){
             int position = offset * length + attroff;
             if(inflag==-1){
                 int value;
-                memcpy(&value, &(buf_ptr.bufferBlock[bufferNum].values[position+4]), sizeof(int));
+                memcpy(&value, &(buf_ptr->blocks[bufferNum].getDataChar[position+4]), sizeof(int));
                 if(value==((Datai*)(w.d))->x)
                     return false;
             }
             else if(inflag==0){
                 float value;
-                memcpy(&value, &(bf.bufferBlock[bufferNum].values[position+4]), sizeof(float));
+                memcpy(&value, &(buf_ptr->blocks[bufferNum].getDataChar[position+4]), sizeof(float));
                 if(value==((Dataf*)(w.d))->x)
                     return false;
             }
             else{
                 char value[100];
-                memcpy(value, &(bf.bufferBlock[bufferNum].values[position+4]), table_in.attr.flag[loca]+1);
+                memcpy(value, &(buf_ptr->blocks[bufferNum].getDataChar[position+4]), table_in.attr.flag[loca]+1);
                 if(string(value)==((Datac*)(w.d))->x)
                     return false;
             }
