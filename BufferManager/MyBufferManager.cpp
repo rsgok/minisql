@@ -1,106 +1,6 @@
-#ifndef _MYBUFFERMANAGER_H
-#define _MYBUFFERMANAGER_H
-
-#include <iostream>
-#include <string.h>
+#include "MyBufferManager.h"
+#include "Catalog.h"
 #include <stdio.h>
-#include <fstream>
-#include <time.h>
-#include "base.h"
-#include "const.h"
-
-using namespace std;
-
-
-// position to insert
-struct InsPos
-{
-    int blockAddr; // block address
-    int position;  // position in the block
-};
-
-// the structure of blocks in buffer
-class BufferBlock
-{
-private:
-    /* data */
-public:
-
-    bool isOccupied;  // check if this block is un-used
-    bool isModified;  // check if this block has been modified
-    string fileName;  // the name of file to which the block belongs to
-    int blockOffset;  // to locate the position of block in original file
-    int recent_access_time; // to tell when the block is called
-    char data[BLOCKSIZE + 1]; // data stored in the block 
-
-    BufferBlock();
-    ~BufferBlock(){};
-
-    void Init();
-    string getDataStr(int begin, int end);
-    char getDataChar(int position);
-
-};
-
-BufferBlock::BufferBlock()
-{
-    Init();
-}
-
-// Initialize the block
-void BufferBlock::Init()
-{
-    isModified = 0;
-    isOccupied = 0;
-    fileName = "";
-    blockOffset = 0;
-    memset(data, EMPTY, BLOCKSIZE);
-    data[BLOCKSIZE] = '\0';
-}
-
-// get data in string form 
-string BufferBlock::getDataStr(int begin, int end)
-{
-    string res = "";
-    for (int i = begin; i < end; i++)
-    {
-        res += data[i];
-    }
-    return res;
-}
-
-// get data in char form 
-char BufferBlock::getDataChar(int position)
-{
-    return data[position];
-}
-
-class BufferManager
-{
-private:
-    /* data */
-public:
-
-
-
-    BufferManager(/* args */);
-    ~BufferManager();
-
-    void WriteBack(int blockAddr);
-    int getBlockAddr(string fileName, int blockOffset);
-    int checkExist(string fileName, int blockOffset);
-    int getUnoccupiedBlock();
-    void readBlock(string fileName, int blockOffset, int blockAddr);
-    void modifyBlock(int blockAddr);
-    InsPos getInsertPosition(Table &tableinfor);
-    int addBlockInFile(Table &tableinfor);
-    void setInvalid(string fileName);
-
-    BufferBlock blocks[MAXBLOCKNUM];
-
-    friend class RecordManager;
-    friend class CataManager;
-};
 
 // constructor
 BufferManager::BufferManager(/* args */)
@@ -109,30 +9,29 @@ BufferManager::BufferManager(/* args */)
     {
         blocks[i].Init();
     }
-    
 }
 
 // destructor
 BufferManager::~BufferManager()
 {
     for (int i = 0; i < MAXBLOCKNUM; i++)
-    {
-        for (int i = 0; i < MAXBLOCKNUM; i++)
-        {
+        if (blocks[i].isOccupied)
             WriteBack(i);
-        }
-    }
 }
 
 // write back the block to file (if it's modified)
 void BufferManager::WriteBack(int blockAddr)
 {
     // if this block is not modified, do nothing
-    if(!blocks[blockAddr].isModified)
+    if (!blocks[blockAddr].isModified)
         return;
     // if it's modified, write data back to file
     string fileName = blocks[blockAddr].fileName;
     FILE *fp;
+	if ((fp = fopen(fileName.c_str(), "r+b")) == NULL) {
+		cout << "Open file error!" << endl; 
+		return;
+	}
     fseek(fp, BLOCKSIZE * blocks[blockAddr].blockOffset, SEEK_SET);
     fwrite(blocks[blockAddr].data, BLOCKSIZE, 1, fp);
 
@@ -148,7 +47,7 @@ int BufferManager::getBlockAddr(string fileName, int blockOffset)
     int blockAddr = checkExist(fileName, blockOffset);
 
     // if not exist, push the block from file to buffer.
-    if(blockAddr == -1)
+    if (blockAddr == -1)
     {
         // find a unoccupied block
         blockAddr = getUnoccupiedBlock();
@@ -175,11 +74,11 @@ int BufferManager::checkExist(string fileName, int blockOffset)
 // find the unoccupied or LRU block to be overwritten; return its address
 int BufferManager::getUnoccupiedBlock()
 {
-    int LRUaddr = 0;  // the address of LRU block
+    int LRUaddr = 0; // the address of LRU block
     for (int i = 0; i < MAXBLOCKNUM; i++)
     {
         // if unoccupied block exist
-        if(!blocks[i].isOccupied)
+        if (!blocks[i].isOccupied)
         {
             blocks[i].Init();
             blocks[i].isOccupied = 1;
@@ -192,7 +91,7 @@ int BufferManager::getUnoccupiedBlock()
             LRUaddr = i;
         }
     }
-    
+
     // write back the LRU block
     WriteBack(LRUaddr);
     blocks[LRUaddr].isOccupied = 1;
@@ -210,11 +109,6 @@ void BufferManager::readBlock(string fileName, int blockOffset, int blockAddr)
     blocks[blockAddr].recent_access_time = clock();
 
     FILE *fp;
-    // if ((fp = fopen(fileName.c_str(), "rb")) == NULL)
-    // {
-    //     cout << "Open file error" << endl;
-    //     return;
-    // }
     fp = fopen(fileName.c_str(), "rb");
     fseek(fp, BLOCKSIZE * blockOffset, SEEK_SET);
     fread(blocks[blockAddr].data, BLOCKSIZE, 1, fp);
@@ -225,7 +119,7 @@ void BufferManager::readBlock(string fileName, int blockOffset, int blockAddr)
 void BufferManager::modifyBlock(int blockAddr)
 {
     blocks[blockAddr].isModified = 1;
-    // record the time 
+    // record the time
     blocks[blockAddr].recent_access_time = clock();
 }
 
@@ -263,6 +157,11 @@ InsPos BufferManager::getInsertPosition(Table &tableinfor)
     //if the block is full, then create new block
     iPos.blockAddr = addBlockInFile(tableinfor);
     iPos.position = 0;
+
+    for (int i = 0; i < MAXBLOCKNUM; i++)
+        if (blocks[i].isOccupied)
+            WriteBack(i);
+
     return iPos;
 }
 
@@ -292,5 +191,3 @@ void BufferManager::setInvalid(string fileName)
         }
     }
 }
-
-#endif
