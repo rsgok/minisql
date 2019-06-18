@@ -7,19 +7,23 @@
 #include <vector>
 #include <iostream>
 #include <utility>
+#include <fstream>
+#include "MyBufferManager.hpp"
 using namespace std;
 #define blockSize 4096 // 块大小规定为4KB，这里和缓冲区相同
 #define nodeSize 3
 #define INT_MAX 1000000
 #define MAX 300 // Math.floor((4096-4-4)/12)
 
+extern BufferManager bf;
+
 class bNode
 {
 public:
     int size;
-    bNode *parentNode;
-    bNode *childNode[MAX]; // 从0开始，共MAX个基本单位
-    pair<int,int> value[MAX]; // first:key; second:addr/offset
+    int parentNode;
+    int childNode[MAX];        // 从0开始，共MAX个基本单位
+    pair<int, int> value[MAX]; // first:key; second:addr/offset
 
     bNode();
     bool isLeaf();
@@ -28,16 +32,16 @@ public:
 bNode::bNode()
 {
     size = 0;
-    parentNode = nullptr;
+    parentNode = -1;
     for (int i = 0; i < MAX; i++)
     {
-        value[i] = make_pair(INT_MAX,-1);
-        childNode[i] = nullptr;
+        value[i] = make_pair(INT_MAX, -1);
+        childNode[i] = -1;
     }
 }
 bool bNode::isLeaf()
 {
-    return childNode[0] == nullptr;
+    return childNode[0] == -1;
 }
 
 class bplusTree
@@ -47,57 +51,60 @@ public:
     bool dataFound;       //每次删除节点时记得把datafound更新为false
     bool searchDataFound; //每次搜索节点时记得把searchDataFound更新为false
     string tableName;     // 对应的表名
-    string keyName;       // 对应的属性名
-    bNode *root;          // 树顶点
+    int root;             // 树顶点
 
-    bplusTree();
-    ~bplusTree(){};
-    bplusTree(string tableName, string keyName);
+    bplusTree(string tableName);
 
-    void splitLeaf(bNode *curNode);
-    void splitNonLeaf(bNode *curNode);
-    void insertNode(bNode *curNode, int key, int addr);
-    void deleteNode(bNode *curNode, int key, int curNodePosition);
-    void mergeNode(bNode *leftNode, bNode *rightNode, bool isLeaf, int posOfRightNode);
-    void redistributeNode(bNode *leftNode, bNode *rightNode, bool isLeaf, int posOfLeftNode, int whichOneisCurNode);
-    int getAddrWithKey(bNode *curNode, int key);
+    void splitLeaf(int curNode);
+    void splitNonLeaf(int curNode);
+    void insertNode(int curNode, int key, int addr);
+    void deleteNode(int curNode, int key, int curNodePosition);
+    void mergeNode(int leftNode, int rightNode, bool isLeaf, int posOfRightNode);
+    void redistributeNode(int leftNode, int rightNode, bool isLeaf, int posOfLeftNode, int whichOneisCurNode);
+    int getAddrWithKey(int curNode, int key);
+    bNode *getBlockPtr(int curNode);
 
-    static void print(vector<bNode *> Nodes); // 打印树结构，调试用
+    void print(vector<bNode *> Nodes); // 打印树结构，调试用
 };
 
-bplusTree::bplusTree()
-{
-    numberOfPointers = nodeSize + 1;
-    root = new bNode();
-    searchDataFound = false;
-    dataFound = false;
-};
-
-bplusTree::bplusTree(string tableName, string keyName)
+bplusTree::bplusTree(string tableName)
 {
     this->tableName = tableName;
-    this->keyName = keyName;
-    root = new bNode();
+    root = 0;
     numberOfPointers = nodeSize + 1;
     searchDataFound = false;
     dataFound = false;
+    fstream fp;
+    fp.open(tableName, ios::in);
+    if (!fp)
+    {
+        fp.open(tableName, ios::out);
+        return;
+    }
+}
+
+bNode *bplusTree::getBlockPtr(int curNode)
+{
+    int buffernum = bf.getBlockAddr(tableName, curNode);
+    return (bNode *)bf.blocks[buffernum].data;
 }
 
 void bplusTree::print(vector<bNode *> Nodes)
 {
     vector<bNode *> newNodes;
+    bNode *tempNode;
     for (auto curNode : Nodes)
     {
         cout << "[|";
         int j;
         for (j = 0; j < curNode->size; j++)
         {
-            cout << curNode->value[j].first<<":"<<curNode->value[j].second << "|";
-            if (curNode->childNode[j] != nullptr)
-                newNodes.push_back(curNode->childNode[j]);
+            cout << curNode->value[j].first << ":" << curNode->value[j].second << "|";
+            if (curNode->childNode[j] != -1)
+                newNodes.push_back(getBlockPtr(curNode->childNode[j]));
         }
-        if (curNode->value[j].first == INT_MAX && curNode->childNode[j] != nullptr)
-            newNodes.push_back(curNode->childNode[j]);
+        if (curNode->value[j].first == INT_MAX && curNode->childNode[j] != -1)
+            newNodes.push_back(getBlockPtr(curNode->childNode[j]));
         cout << "]  ";
     }
     if (newNodes.empty())
@@ -116,384 +123,440 @@ void bplusTree::print(vector<bNode *> Nodes)
     }
 }
 
-void bplusTree::splitLeaf(bNode *curNode)
+void bplusTree::splitLeaf(int curNode)
 {
-//    cout << "this is split leaf node function\n";
-    pair<int,int> tempPair;
+    bf.modifyBlock(curNode);
+    //    cout << "this is split leaf node function\n";
+    pair<int, int> tempPair;
     int x, i, j;
+    bNode *node = getBlockPtr(curNode);
 
     if (numberOfPointers % 2)
         x = (numberOfPointers + 1) / 2;
     else
         x = numberOfPointers / 2;
 
-    auto *rightNode = new bNode();
+    int newBlockNum_rightNode = bf.getUnoccupiedBlock();
+    bNode *rightNode = getBlockPtr(newBlockNum_rightNode);
+    bf.modifyBlock(newBlockNum_rightNode);
 
-    curNode->size = x;
+    node->size = x;
     rightNode->size = numberOfPointers - x;
-    rightNode->parentNode = curNode->parentNode;
+    rightNode->parentNode = node->parentNode;
 
     for (i = x, j = 0; i < numberOfPointers; i++, j++)
     {
-        rightNode->value[j] = curNode->value[i];
-        curNode->value[i] = make_pair(INT_MAX,-1);
+        rightNode->value[j] = node->value[i];
+        node->value[i] = make_pair(INT_MAX, -1);
     }
     int val = rightNode->value[0].first;
     int address = rightNode->value[0].second;
-    if (curNode->parentNode == nullptr)
+    if (node->parentNode == -1)
     {
-        auto *parentNode = new bNode();
-        parentNode->parentNode = nullptr;
+        int newBlockNum_parentNode = bf.getUnoccupiedBlock();
+        bNode *parentNode = getBlockPtr(newBlockNum_parentNode);
+        bf.modifyBlock(newBlockNum_parentNode);
+        parentNode->parentNode = -1;
         parentNode->size = 1;
         parentNode->value[0] = rightNode->value[0];
         parentNode->childNode[0] = curNode;
-        parentNode->childNode[1] = rightNode;
-        curNode->parentNode = rightNode->parentNode = parentNode;
-        root = parentNode;
+        parentNode->childNode[1] = newBlockNum_rightNode;
+        node->parentNode = rightNode->parentNode = newBlockNum_parentNode;
+        root = newBlockNum_parentNode;
         return;
     }
     else
     {
-        curNode = curNode->parentNode;
-        auto *newChildNode = new bNode();
+        curNode = node->parentNode;
+        int newBlockNum_ChildNode = bf.getUnoccupiedBlock();
+        bNode *newChildNode = getBlockPtr(newBlockNum_ChildNode);
+        bf.modifyBlock(newBlockNum_ChildNode);
         newChildNode = rightNode;
-        tempPair = make_pair(val,address);
-        for (i = 0; i <= curNode->size; i++)
+        tempPair = make_pair(val, address);
+        for (i = 0; i <= node->size; i++)
         {
-            if (val < curNode->value[i].first)
+            if (val < node->value[i].first)
             {
-                swap(curNode->value[i], tempPair);
+                swap(node->value[i], tempPair);
             }
         }
-        curNode->size++;
-        for (i = 0; i < curNode->size; i++)
+        node->size++;
+        bNode *tempBlockPtr;
+        for (i = 0; i < node->size; i++)
         {
-            if (newChildNode->value[0] < curNode->childNode[i]->value[0])
+            tempBlockPtr = getBlockPtr(node->childNode[i]);
+            if (newChildNode->value[0] < tempBlockPtr->value[0])
             {
-                swap(curNode->childNode[i], newChildNode);
+                swap(node->childNode[i], newBlockNum_ChildNode);
             }
         }
-        curNode->childNode[i] = newChildNode;
-        for (i = 0; curNode->childNode[i] != nullptr; i++)
+        node->childNode[i] = newBlockNum_ChildNode;
+        for (i = 0; node->childNode[i] != -1; i++)
         {
-            curNode->childNode[i]->parentNode = curNode;
+            tempBlockPtr = getBlockPtr(node->childNode[i]);
+            tempBlockPtr->parentNode = curNode;
         }
     }
 }
 
-void bplusTree::splitNonLeaf(bNode *curNode)
+void bplusTree::splitNonLeaf(int curNode)
 {
-    cout << "this is split nonleaf node function\n";
+    bf.modifyBlock(curNode);
+    // cout << "this is split nonleaf node function\n";
     int x, i, j;
-    pair<int,int> tempPair;
+    pair<int, int> tempPair;
+    bNode *node = getBlockPtr(curNode);
 
     x = numberOfPointers / 2;
-    auto *rightNode = new bNode();
-    curNode->size = x;
+
+    int newBlockNum_rightNode = bf.getUnoccupiedBlock();
+    bNode *rightNode = getBlockPtr(newBlockNum_rightNode);
+    bf.modifyBlock(newBlockNum_rightNode);
+
+    node->size = x;
     rightNode->size = numberOfPointers - x - 1;
-    rightNode->parentNode = curNode->parentNode;
+    rightNode->parentNode = node->parentNode;
 
     for (i = x, j = 0; i <= numberOfPointers; i++, j++)
     {
-        rightNode->value[j] = curNode->value[i];
-        rightNode->childNode[j] = curNode->childNode[i];
-        curNode->value[i] = make_pair(INT_MAX,-1);
+        rightNode->value[j] = node->value[i];
+        rightNode->childNode[j] = node->childNode[i];
+        node->value[i] = make_pair(INT_MAX, -1);
         if (i != x)
-            curNode->childNode[i] = nullptr;
+            node->childNode[i] = -1;
     }
     int val = rightNode->value[0].first;
     int address = rightNode->value[0].second;
     memcpy(&rightNode->value, &rightNode->value[1], sizeof(int) * (rightNode->size + 1));
     memcpy(&rightNode->childNode, &rightNode->childNode[1], sizeof(root) * (rightNode->size + 1));
 
-    for (i = 0; curNode->childNode[i] != nullptr; i++)
+    bNode *tempBlockPtr;
+    for (i = 0; node->childNode[i] != -1; i++)
     {
-        curNode->childNode[i]->parentNode = curNode;
+        tempBlockPtr = getBlockPtr(node->childNode[i]);
+        tempBlockPtr->parentNode = curNode;
     }
-    for (i = 0; rightNode->childNode[i] != nullptr; i++)
+    for (i = 0; rightNode->childNode[i] != -1; i++)
     {
-        rightNode->childNode[i]->parentNode = rightNode;
+        tempBlockPtr = getBlockPtr(node->childNode[i]);
+        tempBlockPtr->parentNode = newBlockNum_rightNode;
     }
 
-    if (curNode->parentNode == nullptr)
+    if (node->parentNode == -1)
     {
-        auto *parentNode = new bNode();
-        parentNode->parentNode = nullptr;
+        int newBlockNum_parentNode = bf.getUnoccupiedBlock();
+        bNode *parentNode = getBlockPtr(newBlockNum_parentNode);
+        bf.modifyBlock(newBlockNum_parentNode);
+        parentNode->parentNode = -1;
         parentNode->size = 1;
-        parentNode->value[0] = make_pair(val,address);
+        parentNode->value[0] = make_pair(val, address);
         parentNode->childNode[0] = curNode;
-        parentNode->childNode[1] = rightNode;
-        curNode->parentNode = rightNode->parentNode = parentNode;
-        root = parentNode;
+        parentNode->childNode[1] = newBlockNum_rightNode;
+        node->parentNode = rightNode->parentNode = newBlockNum_parentNode;
+        root = newBlockNum_parentNode;
         return;
     }
     else
     {
-        curNode = curNode->parentNode;
-        auto *newChildNode = new bNode();
+        curNode = node->parentNode;
+        int newBlockNum_ChildNode = bf.getUnoccupiedBlock();
+        bNode *newChildNode = getBlockPtr(newBlockNum_ChildNode);
+        bf.modifyBlock(newBlockNum_ChildNode);
         newChildNode = rightNode;
-        tempPair = make_pair(val,address);
-        for (i = 0; i <= curNode->size; i++)
+        tempPair = make_pair(val, address);
+        for (i = 0; i <= node->size; i++)
         {
-            if (val < curNode->value[i].first)
+            if (val < node->value[i].first)
             {
-                swap(curNode->value[i], tempPair);
+                swap(node->value[i], tempPair);
             }
         }
-        curNode->size++;
-        for (i = 0; i < curNode->size; i++)
+        node->size++;
+        for (i = 0; i < node->size; i++)
         {
-            if (newChildNode->value[0] < curNode->childNode[i]->value[0])
+            tempBlockPtr = getBlockPtr(node->childNode[i]);
+            if (newChildNode->value[0] < tempBlockPtr->value[0])
             {
-                swap(curNode->childNode[i], newChildNode);
+                swap(node->childNode[i], newBlockNum_ChildNode);
             }
         }
-        curNode->childNode[i] = newChildNode;
-        for (i = 0; curNode->childNode[i] != nullptr; i++)
+        node->childNode[i] = newBlockNum_ChildNode;
+        for (i = 0; node->childNode[i] != -1; i++)
         {
-            curNode->childNode[i]->parentNode = curNode;
+            tempBlockPtr = getBlockPtr(node->childNode[i]);
+            tempBlockPtr->parentNode = curNode;
         }
     }
 }
 
-void bplusTree::insertNode(bNode *curNode, int key, int addr)
+void bplusTree::insertNode(int curNode, int key, int addr)
 {
-    cout << "this is insert node function\n";
-    pair<int,int> tempPair = make_pair(key,addr);
-    for (int i = 0; i <= curNode->size; i++)
+    bf.modifyBlock(curNode);
+    // cout << "this is insert node function\n";
+    pair<int, int> tempPair = make_pair(key, addr);
+    bNode *node = getBlockPtr(curNode);
+    for (int i = 0; i <= node->size; i++)
     {
-        if (key < curNode->value[i].first && curNode->childNode[i] != nullptr)
+        if (key < node->value[i].first && node->childNode[i] != -1)
         {
-            insertNode(curNode->childNode[i], key,addr);
-            if (curNode->size == numberOfPointers)
+            insertNode(node->childNode[i], key, addr);
+            if (node->size == numberOfPointers)
                 splitNonLeaf(curNode);
             return;
         }
-        else if (key < curNode->value[i].first && curNode->childNode[i] == nullptr)
+        else if (key < node->value[i].first && node->childNode[i] == -1)
         {
-            swap(curNode->value[i], tempPair);
-            if (i == curNode->size)
+            swap(node->value[i], tempPair);
+            if (i == node->size)
             {
-                curNode->size++;
+                node->size++;
                 break;
             }
         }
     }
-    if (curNode->size == numberOfPointers)
+    if (node->size == numberOfPointers)
     {
         splitLeaf(curNode);
     }
 }
 
-void bplusTree::redistributeNode(bNode *leftNode, bNode *rightNode, bool isLeaf, int posOfLeftNode, int whichOneisCurNode)
+void bplusTree::redistributeNode(int leftNode, int rightNode, bool isLeaf, int posOfLeftNode, int whichOneisCurNode)
 {
+    bNode *tempBlockPtr;
+    bf.modifyBlock(leftNode);
+    bf.modifyBlock(rightNode);
+    bNode *leftNodePtr = getBlockPtr(leftNode);
+    bNode *rightNodePtr = getBlockPtr(rightNode);
+    tempBlockPtr = getBlockPtr(leftNodePtr->parentNode);
     if (whichOneisCurNode == 0)
     {
         if (!isLeaf)
         {
-            leftNode->value[leftNode->size] = leftNode->parentNode->value[posOfLeftNode];
-            leftNode->childNode[leftNode->size + 1] = rightNode->childNode[0];
-            leftNode->size++;
-            leftNode->parentNode->value[posOfLeftNode] = rightNode->value[0];
-            memcpy(&rightNode->value[0], &rightNode->value[1], sizeof(int) * (rightNode->size + 1));
-            memcpy(&rightNode->childNode[0], &rightNode->childNode[1], sizeof(root) * (rightNode->size + 1));
-            rightNode->size--;
+            leftNodePtr->value[leftNodePtr->size] = tempBlockPtr->value[posOfLeftNode];
+            leftNodePtr->childNode[leftNodePtr->size + 1] = rightNodePtr->childNode[0];
+            leftNodePtr->size++;
+            tempBlockPtr->value[posOfLeftNode] = rightNodePtr->value[0];
+            memcpy(&rightNodePtr->value[0], &rightNodePtr->value[1], sizeof(int) * (rightNodePtr->size + 1));
+            memcpy(&rightNodePtr->childNode[0], &rightNodePtr->childNode[1], sizeof(root) * (rightNodePtr->size + 1));
+            rightNodePtr->size--;
         }
         else
         {
-            leftNode->value[leftNode->size] = rightNode->value[0];
-            leftNode->size++;
-            memcpy(&rightNode->value[0], &rightNode->value[1], sizeof(int) * (rightNode->size + 1));
-            rightNode->size--;
-            leftNode->parentNode->value[posOfLeftNode] = rightNode->value[0];
+            leftNodePtr->value[leftNodePtr->size] = rightNodePtr->value[0];
+            leftNodePtr->size++;
+            memcpy(&rightNodePtr->value[0], &rightNodePtr->value[1], sizeof(int) * (rightNodePtr->size + 1));
+            rightNodePtr->size--;
+            tempBlockPtr->value[posOfLeftNode] = rightNodePtr->value[0];
         }
     }
     else
     {
         if (!isLeaf)
         {
-            memcpy(&rightNode->value[1], &rightNode->value[0], sizeof(int) * (rightNode->size + 1));
-            memcpy(&rightNode->childNode[1], &rightNode->childNode[0], sizeof(root) * (rightNode->size + 1));
-            rightNode->value[0] = leftNode->parentNode->value[posOfLeftNode];
-            rightNode->childNode[0] = leftNode->childNode[leftNode->size];
-            rightNode->size++;
-            leftNode->parentNode->value[posOfLeftNode] = leftNode->value[leftNode->size - 1];
-            leftNode->value[leftNode->size - 1] = make_pair(INT_MAX,-1);
-            leftNode->childNode[leftNode->size] = nullptr;
-            leftNode->size--;
+            memcpy(&rightNodePtr->value[1], &rightNodePtr->value[0], sizeof(int) * (rightNodePtr->size + 1));
+            memcpy(&rightNodePtr->childNode[1], &rightNodePtr->childNode[0], sizeof(root) * (rightNodePtr->size + 1));
+            rightNodePtr->value[0] = tempBlockPtr->value[posOfLeftNode];
+            rightNodePtr->childNode[0] = leftNodePtr->childNode[leftNodePtr->size];
+            rightNodePtr->size++;
+            tempBlockPtr->value[posOfLeftNode] = leftNodePtr->value[leftNodePtr->size - 1];
+            leftNodePtr->value[leftNodePtr->size - 1] = make_pair(INT_MAX, -1);
+            leftNodePtr->childNode[leftNodePtr->size] = -1;
+            leftNodePtr->size--;
         }
         else
         {
-            memcpy(&rightNode->value[1], &rightNode->value[0], sizeof(int) * (rightNode->size + 1));
-            rightNode->value[0] = leftNode->value[leftNode->size - 1];
-            rightNode->size++;
-            leftNode->value[leftNode->size - 1] = make_pair(INT_MAX,-1);
-            leftNode->size--;
-            leftNode->parentNode->value[posOfLeftNode] = rightNode->value[0];
+            memcpy(&rightNodePtr->value[1], &rightNodePtr->value[0], sizeof(int) * (rightNodePtr->size + 1));
+            rightNodePtr->value[0] = leftNodePtr->value[leftNodePtr->size - 1];
+            rightNodePtr->size++;
+            leftNodePtr->value[leftNodePtr->size - 1] = make_pair(INT_MAX, -1);
+            leftNodePtr->size--;
+            tempBlockPtr->value[posOfLeftNode] = rightNodePtr->value[0];
         }
     }
 }
 
-void bplusTree::mergeNode(bNode *leftNode, bNode *rightNode, bool isLeaf, int posOfRightNode)
+void bplusTree::mergeNode(int leftNode, int rightNode, bool isLeaf, int posOfRightNode)
 {
+    bNode *tempBlockPtr;
+    bNode *tempBlockPtr2;
+    bf.modifyBlock(leftNode);
+    bf.modifyBlock(rightNode);
+    bNode *leftNodePtr = getBlockPtr(leftNode);
+    bNode *rightNodePtr = getBlockPtr(rightNode);
+    tempBlockPtr = getBlockPtr(leftNodePtr->parentNode);
     if (!isLeaf)
     {
-        leftNode->value[leftNode->size] = leftNode->parentNode->value[posOfRightNode - 1];
-        leftNode->size++;
+        leftNodePtr->value[leftNodePtr->size] = tempBlockPtr->value[posOfRightNode - 1];
+        leftNodePtr->size++;
     }
-    memcpy(&leftNode->value[leftNode->size], &rightNode->value[0], sizeof(int) * (rightNode->size + 1));
-    memcpy(&leftNode->childNode[leftNode->size], &rightNode->childNode[0], sizeof(root) * (rightNode->size + 1));
+    memcpy(&leftNodePtr->value[leftNodePtr->size], &rightNodePtr->value[0], sizeof(int) * (rightNodePtr->size + 1));
+    memcpy(&leftNodePtr->childNode[leftNodePtr->size], &rightNodePtr->childNode[0], sizeof(root) * (rightNodePtr->size + 1));
 
-    leftNode->size += rightNode->size;
-    memcpy(&leftNode->parentNode->value[posOfRightNode - 1], &leftNode->parentNode->value[posOfRightNode], sizeof(int) * (leftNode->parentNode->size + 1));
-    memcpy(&leftNode->parentNode->childNode[posOfRightNode], &leftNode->parentNode->childNode[posOfRightNode + 1], sizeof(root) * (leftNode->parentNode->size + 1));
-    leftNode->parentNode->size--;
-    for (int i = 0; leftNode->childNode[i] != nullptr; i++)
+    leftNodePtr->size += rightNodePtr->size;
+    memcpy(&tempBlockPtr->value[posOfRightNode - 1], &tempBlockPtr->value[posOfRightNode], sizeof(int) * (tempBlockPtr->size + 1));
+    memcpy(&tempBlockPtr->childNode[posOfRightNode], &tempBlockPtr->childNode[posOfRightNode + 1], sizeof(root) * (tempBlockPtr->size + 1));
+    tempBlockPtr->size--;
+    for (int i = 0; leftNodePtr->childNode[i] != -1; i++)
     {
-        leftNode->childNode[i]->parentNode = leftNode;
+        tempBlockPtr2 = getBlockPtr(leftNodePtr->childNode[i]);
+        tempBlockPtr2->parentNode = leftNode;
     }
 }
 
-void bplusTree::deleteNode(bNode *curNode, int key, int curNodePosition)
+void bplusTree::deleteNode(int curNode, int key, int curNodePosition)
 {
-    bool isLeaf = curNode->isLeaf();
-    int prevLeftMostVal = curNode->value[0].first;
+    bf.modifyBlock(curNode);
+    bNode *node = getBlockPtr(curNode);
+    bNode *tempBlockPtr;
 
-    for (int i = 0; !dataFound && i <= curNode->size; i++)
+    bool isLeaf = node->isLeaf();
+    int prevLeftMostVal = node->value[0].first;
+
+    for (int i = 0; !dataFound && i <= node->size; i++)
     {
-        if (key < curNode->value[i].first && curNode->childNode[i] != nullptr)
+        if (key < node->value[i].first && node->childNode[i] != -1)
         {
-            deleteNode(curNode->childNode[i], key, i);
+            deleteNode(node->childNode[i], key, i);
         }
-        else if (key == curNode->value[i].first && curNode->childNode[i] == nullptr)
+        else if (key == node->value[i].first && node->childNode[i] == -1)
         {
-            memcpy(&curNode->value[i], &curNode->value[i + 1], sizeof(int) * (curNode->size + 1));
-            curNode->size--;
+            memcpy(&node->value[i], &node->value[i + 1], sizeof(int) * (node->size + 1));
+            node->size--;
             dataFound = true;
             break;
         }
     }
-    if (curNode->parentNode == nullptr && curNode->childNode[0] == nullptr)
+    if (node->parentNode == -1 && node->childNode[0] == -1)
     {
         return;
     }
-    if (curNode->parentNode == nullptr && curNode->childNode[0] != nullptr && curNode->size == 0)
+    if (node->parentNode == -1 && node->childNode[0] != -1 && node->size == 0)
     {
-        root = curNode->childNode[0];
-        root->parentNode = nullptr;
+        root = node->childNode[0];
+        bf.modifyBlock(root);
+        tempBlockPtr = getBlockPtr(root);
+        tempBlockPtr->parentNode = -1;
         return;
     }
-    if (isLeaf && curNode->parentNode != nullptr)
+    if (isLeaf && node->parentNode != -1)
     {
         if (curNodePosition == 0)
         {
-            auto *rightNode = new bNode();
-            rightNode = curNode->parentNode->childNode[1];
-            if (rightNode != nullptr && rightNode->size > (numberOfPointers + 1) / 2)
+            tempBlockPtr = getBlockPtr(node->parentNode);
+            int rightNodeNum = tempBlockPtr->childNode[1];
+            bNode *rightNode = getBlockPtr(rightNodeNum);
+            if (rightNodeNum != -1 && rightNode->size > (numberOfPointers + 1) / 2)
             {
-                redistributeNode(curNode, rightNode, isLeaf, 0, 0);
+                redistributeNode(curNode, rightNodeNum, isLeaf, 0, 0);
             }
-            else if (rightNode != nullptr && curNode->size + rightNode->size < numberOfPointers)
+            else if (rightNodeNum != -1 && node->size + rightNode->size < numberOfPointers)
             {
-                mergeNode(curNode, rightNode, isLeaf, 1);
+                mergeNode(curNode, rightNodeNum, isLeaf, 1);
             }
         }
         else
         {
-            auto *leftNode = new bNode();
-            auto *rightNode = new bNode();
-            leftNode = curNode->parentNode->childNode[curNodePosition - 1];
-            rightNode = curNode->parentNode->childNode[curNodePosition + 1];
-            if (leftNode != nullptr && leftNode->size > (numberOfPointers + 1) / 2)
+            tempBlockPtr = getBlockPtr(node->parentNode);
+            int leftNodeNum = tempBlockPtr->childNode[curNodePosition - 1];
+            int rightNodeNum = tempBlockPtr->childNode[curNodePosition + 1];
+            bNode *leftNode = getBlockPtr(leftNodeNum);
+            bNode *rightNode = getBlockPtr(rightNodeNum);
+            if (leftNodeNum != -1 && leftNode->size > (numberOfPointers + 1) / 2)
             {
-                redistributeNode(leftNode, curNode, isLeaf, curNodePosition - 1, 1);
+                redistributeNode(leftNodeNum, curNode, isLeaf, curNodePosition - 1, 1);
             }
-            else if (rightNode != nullptr && rightNode->size > (numberOfPointers + 1) / 2)
+            else if (rightNodeNum != -1 && rightNode->size > (numberOfPointers + 1) / 2)
             {
-                redistributeNode(curNode, rightNode, isLeaf, curNodePosition, 0);
+                redistributeNode(curNode, rightNodeNum, isLeaf, curNodePosition, 0);
             }
-            else if (leftNode != nullptr && curNode->size + leftNode->size < numberOfPointers)
+            else if (leftNodeNum != -1 && node->size + leftNode->size < numberOfPointers)
             {
-                mergeNode(leftNode, curNode, isLeaf, curNodePosition);
+                mergeNode(leftNodeNum, curNode, isLeaf, curNodePosition);
             }
-            else if (rightNode != nullptr && curNode->size + rightNode->size < numberOfPointers)
+            else if (rightNodeNum != -1 && node->size + rightNode->size < numberOfPointers)
             {
-                mergeNode(curNode, rightNode, isLeaf, curNodePosition + 1);
+                mergeNode(curNode, rightNodeNum, isLeaf, curNodePosition + 1);
             }
         }
     }
-    else if (!isLeaf && curNode->parentNode != nullptr)
+    else if (!isLeaf && node->parentNode != -1)
     {
 
         if (curNodePosition == 0)
         {
-            auto *rightNode = new bNode();
-            rightNode = curNode->parentNode->childNode[1];
-            if (rightNode != nullptr && rightNode->size - 1 >= ceil((numberOfPointers - 1) / 2))
+            tempBlockPtr = getBlockPtr(node->parentNode);
+            int rightNodeNum = tempBlockPtr->childNode[1];
+            bNode *rightNode = getBlockPtr(rightNodeNum);
+            if (rightNodeNum != -1 && rightNode->size - 1 >= ceil((numberOfPointers - 1) / 2))
             {
-                redistributeNode(curNode, rightNode, isLeaf, 0, 0);
+                redistributeNode(curNode, rightNodeNum, isLeaf, 0, 0);
             }
-            else if (rightNode != nullptr && curNode->size + rightNode->size < numberOfPointers - 1)
+            else if (rightNodeNum != -1 && node->size + rightNode->size < numberOfPointers - 1)
             {
-                mergeNode(curNode, rightNode, isLeaf, 1);
+                mergeNode(curNode, rightNodeNum, isLeaf, 1);
             }
         }
         else
         {
-            auto *leftNode = new bNode();
-            auto *rightNode = new bNode();
-            leftNode = curNode->parentNode->childNode[curNodePosition - 1];
-            rightNode = curNode->parentNode->childNode[curNodePosition + 1];
-            if (leftNode != nullptr && leftNode->size - 1 >= ceil((numberOfPointers - 1) / 2))
+            tempBlockPtr = getBlockPtr(node->parentNode);
+            int leftNodeNum = tempBlockPtr->childNode[curNodePosition - 1];
+            int rightNodeNum = tempBlockPtr->childNode[curNodePosition + 1];
+            bNode *leftNode = getBlockPtr(leftNodeNum);
+            bNode *rightNode = getBlockPtr(rightNodeNum);
+            if (leftNodeNum != -1 && leftNode->size - 1 >= ceil((numberOfPointers - 1) / 2))
             {
-                redistributeNode(leftNode, curNode, isLeaf, curNodePosition - 1, 1);
+                redistributeNode(leftNodeNum, curNode, isLeaf, curNodePosition - 1, 1);
             }
-            else if (rightNode != nullptr && rightNode->size - 1 >= ceil((numberOfPointers - 1) / 2))
+            else if (rightNodeNum != -1 && rightNode->size - 1 >= ceil((numberOfPointers - 1) / 2))
             {
-                redistributeNode(curNode, rightNode, isLeaf, curNodePosition, 0);
+                redistributeNode(curNode, rightNodeNum, isLeaf, curNodePosition, 0);
             }
-            else if (leftNode != nullptr && curNode->size + leftNode->size < numberOfPointers - 1)
+            else if (leftNodeNum != -1 && node->size + leftNode->size < numberOfPointers - 1)
             {
-                mergeNode(leftNode, curNode, isLeaf, curNodePosition);
+                mergeNode(leftNodeNum, curNode, isLeaf, curNodePosition);
             }
-            else if (rightNode != nullptr && curNode->size + rightNode->size < numberOfPointers - 1)
+            else if (rightNodeNum != -1 && node->size + rightNode->size < numberOfPointers - 1)
             {
-                mergeNode(curNode, rightNode, isLeaf, curNodePosition + 1);
+                mergeNode(curNode, rightNodeNum, isLeaf, curNodePosition + 1);
             }
         }
     }
-    auto *tempNode = new bNode();
-    tempNode = curNode->parentNode;
-    while (tempNode != nullptr)
+    int tempNodeNum = node->parentNode;
+    bNode *tempNode = getBlockPtr(tempNodeNum);
+    while (tempNodeNum != -1)
     {
         for (int i = 0; i < tempNode->size; i++)
         {
             if (tempNode->value[i].first == prevLeftMostVal)
             {
-                tempNode->value[i] = curNode->value[0];
+                tempNode->value[i] = node->value[0];
                 break;
             }
         }
-        tempNode = tempNode->parentNode;
+        tempNodeNum = tempNode->parentNode;
+        tempNode = getBlockPtr(tempNodeNum);
     }
 }
 
-int bplusTree::getAddrWithKey(bNode *curNode, int key)
+int bplusTree::getAddrWithKey(int curNode, int key)
 {
-    for (int i = 0; i < curNode->size; i++)
+    bNode *node = getBlockPtr(curNode);
+    for (int i = 0; i < node->size; i++)
     {
-        if (curNode->value[i].first == key)
+        if (node->value[i].first == key)
         {
             searchDataFound = true;
-            return curNode->value[i].second;
+            return node->value[i].second;
         }
-        else if (curNode->value[i].first > key)
+        else if (node->value[i].first > key)
         {
-            if(curNode->isLeaf()) return -1;
-            return getAddrWithKey(curNode->childNode[i], key);
+            if (node->isLeaf())
+                return -1;
+            return getAddrWithKey(node->childNode[i], key);
         }
     }
-    if(!searchDataFound) return -1;
+    if (!searchDataFound)
+        return -1;
 }
 
 #endif
